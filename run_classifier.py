@@ -25,6 +25,12 @@ import modeling
 import optimization
 import tokenization
 import tensorflow as tf
+import re
+import html2text
+
+import sys
+reload(sys)
+sys.setdefaultencoding('utf8')
 
 flags = tf.flags
 
@@ -332,6 +338,71 @@ class MrpcProcessor(DataProcessor):
           InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
     return examples
 
+
+class IcbuTicketsProcessor(DataProcessor):
+    """Processor for the Icbu tickets data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_train.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "idbu_tickets_test.tsv")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        if not hasattr(self, 'labels'):
+            lines = self._read_tsv(os.path.join(FLAGS.data_dir, "icbu_tickets_labels.tsv"))
+            self.labels = []
+            for (i, line) in enumerate(lines):
+                if i == 0:
+                    continue
+                self.labels.append(tokenization.convert_to_unicode(line[0]))
+
+        return self.labels
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, i)
+            text_a = tokenization.convert_to_unicode(self._html2text(line[5]))
+            #text_b = tokenization.convert_to_unicode(line[9])
+            if set_type == "test":
+                label = "0"
+            else:
+                label = tokenization.convert_to_unicode(line[9])
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+    def _html2text(self, line):
+        text = html2text.html2text(line)
+        html_keys = ["font-size:.{0,20}?;", "line-height:.{0,20}?;", "font-family:.{0,20}?;",
+                     "vertical-align:.{0,20}?;", "color:.{0,20}?;", "margin:.{0,20}?;",
+                     "padding:.{0,20}?;", "border:.{0,20}?;", "font-style:.{0,20}?;",
+                     "font-variant:.{0,20}?;", "font-weight:.{0,20}?;", "font-stretch:.{0,20}?;",
+                     "font-size:.{0,20}?;", "line-height:.{0,20}?;", "font-family:.{0,100}?;",
+                     "vertical-align:.{0,20}?;",
+                     "<img .{0,200}?>",
+                     "!\[\]\(\)",
+                     "\[\]\(\)",
+                     "请务必提全相关信息（否则会影响工单处理时长），如信息不全一律退回，谢谢配合！"]
+        for (i, expr) in enumerate(html_keys):
+            p = re.compile(expr)
+            text = p.sub('', text)
+
+        return line
 
 class ColaProcessor(DataProcessor):
   """Processor for the CoLA data set (GLUE version)."""
@@ -788,6 +859,7 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "icbu-tickets": IcbuTicketsProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
