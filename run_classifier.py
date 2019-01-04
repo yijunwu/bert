@@ -28,9 +28,11 @@ import tensorflow as tf
 import re
 import html2text
 
-import sys
-reload(sys)
-sys.setdefaultencoding('utf8')
+#from importlib import reload
+
+#import sys
+#reload(sys)
+#sys.setdefaultencoding('utf8')
 
 flags = tf.flags
 
@@ -398,11 +400,27 @@ class IcbuTicketsProcessor(DataProcessor):
                      "!\[\]\(\)",
                      "\[\]\(\)",
                      "请务必提全相关信息（否则会影响工单处理时长），如信息不全一律退回，谢谢配合！"]
+        segments_to_replace = {"<br>": "。",
+                               "<br/>": "。",
+                               "<p>": "。",
+                               "</p>": "。",
+                               "[\n ]{2,10}": "\n",
+                               "\n\n\n\n": "\n",
+                               "\n\n\n": "\n",
+                               "\n\n": "\n",
+                               "。。。。": "。",
+                               "。。。": "。",
+                               "。。": "。",
+                               "。\n[\n 。]{1,10}": "。\n",}
         for (i, expr) in enumerate(html_keys):
             p = re.compile(expr)
             text = p.sub('', text)
 
-        return line
+        for (i, expr) in enumerate(segments_to_replace.keys()):
+            p = re.compile(expr)
+            text = p.sub(segments_to_replace[expr], text)
+
+        return text
 
 class ColaProcessor(DataProcessor):
   """Processor for the CoLA data set (GLUE version)."""
