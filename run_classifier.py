@@ -357,7 +357,7 @@ class IcbuTicketsProcessor(DataProcessor):
     def get_test_examples(self, data_dir):
         """See base class."""
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "idbu_tickets_test.tsv")), "test")
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "test")
 
     def get_labels(self):
         """See base class."""
@@ -381,7 +381,7 @@ class IcbuTicketsProcessor(DataProcessor):
             text_a = tokenization.convert_to_unicode(self._html2text(line[5]))
             #text_b = tokenization.convert_to_unicode(line[9])
             if set_type == "test":
-                label = "0"
+                label = "ICBU/测试"
             else:
                 label = tokenization.convert_to_unicode(line[9])
             examples.append(
