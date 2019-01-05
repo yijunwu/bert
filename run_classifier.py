@@ -381,7 +381,7 @@ class IcbuTicketsProcessor(DataProcessor):
             text_a = tokenization.convert_to_unicode(self._html2text(line[5]))
             #text_b = tokenization.convert_to_unicode(line[9])
             if set_type == "test":
-                label = "ICBU/测试"
+                label = "ICBU/ICBU"
             else:
                 label = tokenization.convert_to_unicode(line[9])
             examples.append(
