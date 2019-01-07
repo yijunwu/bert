@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # coding=utf-8
 # Copyright 2018 The Google AI Language Team Authors.
 #
@@ -27,6 +28,11 @@ import tokenization
 import tensorflow as tf
 import re
 import html2text
+
+from tensorflow.python.estimator import run_config as run_config_lib
+from tensorflow.python.estimator import model_fn as model_fn_lib
+from tensorflow.python.estimator import estimator as estimator_lib
+from tensorflow.contrib.training.python.training import hparam
 
 #from importlib import reload
 
@@ -763,11 +769,12 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      # output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      output_spec = model_fn_lib.EstimatorSpec(
           mode=mode,
           loss=total_loss,
-          train_op=train_op,
-          scaffold_fn=scaffold_fn)
+          train_op=train_op,)
+          #scaffold_fn=scaffold_fn)
     elif mode == tf.estimator.ModeKeys.EVAL:
 
       def metric_fn(per_example_loss, label_ids, logits, is_real_example):
@@ -782,16 +789,18 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
       eval_metrics = (metric_fn,
                       [per_example_loss, label_ids, logits, is_real_example])
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      # output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      output_spec = model_fn_lib.EstimatorSpec(
           mode=mode,
-          loss=total_loss,
-          eval_metrics=eval_metrics,
-          scaffold_fn=scaffold_fn)
+          loss=total_loss,)
+          #eval_metrics=eval_metrics,
+          #scaffold_fn=scaffold_fn)
     else:
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      # output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      output_spec = model_fn_lib.EstimatorSpec(
           mode=mode,
-          predictions={"probabilities": probabilities},
-          scaffold_fn=scaffold_fn)
+          predictions={"probabilities": probabilities},)
+          #scaffold_fn=scaffold_fn)
     return output_spec
 
   return model_fn
@@ -868,6 +877,17 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
     features.append(feature)
   return features
 
+def _add_item_to_params(params, key, value):
+    """Adds a new item into `params`."""
+    if isinstance(params, hparam.HParams):
+        # For HParams, we need to use special API.
+        if key in params:
+            params.set_hparam(key, value)
+        else:
+            params.add_hparam(key, value)
+    else:
+        # Now params is Python dict.
+        params[key] = value
 
 def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
@@ -914,16 +934,21 @@ def main(_):
     tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
-  is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
-  run_config = tf.contrib.tpu.RunConfig(
-      cluster=tpu_cluster_resolver,
-      master=FLAGS.master,
+  # is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+
+  # run_config = tf.contrib.tpu.RunConfig(
+  #   cluster=tpu_cluster_resolver,
+  #   master=FLAGS.master,
+  #   model_dir=FLAGS.output_dir,
+  #     save_checkpoints_steps=FLAGS.save_checkpoints_steps,
+  #     tpu_config=tf.contrib.tpu.TPUConfig(
+  #         iterations_per_loop=FLAGS.iterations_per_loop,
+  #         num_shards=FLAGS.num_tpu_cores,
+  #         per_host_input_for_training=is_per_host))
+
+  run_config = run_config_lib.RunConfig(
       model_dir=FLAGS.output_dir,
-      save_checkpoints_steps=FLAGS.save_checkpoints_steps,
-      tpu_config=tf.contrib.tpu.TPUConfig(
-          iterations_per_loop=FLAGS.iterations_per_loop,
-          num_shards=FLAGS.num_tpu_cores,
-          per_host_input_for_training=is_per_host))
+      save_checkpoints_steps=FLAGS.save_checkpoints_steps)
 
   train_examples = None
   num_train_steps = None
@@ -946,13 +971,24 @@ def main(_):
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
   # or GPU.
-  estimator = tf.contrib.tpu.TPUEstimator(
-      use_tpu=FLAGS.use_tpu,
+  # estimator = tf.contrib.tpu.python.tpu.TPUEstimator(
+  #     use_tpu=FLAGS.use_tpu,
+  #     model_fn=model_fn,
+  #     config=run_config,
+  #     train_batch_size=FLAGS.train_batch_size,
+  #     eval_batch_size=FLAGS.eval_batch_size,
+  #     predict_batch_size=FLAGS.predict_batch_size)
+
+  params = None
+  params = params or {}
+  _add_item_to_params(params, 'batch_size', 8)
+  run_config = run_config.replace(log_step_count_steps=None)
+  estimator = estimator_lib.Estimator(
       model_fn=model_fn,
+      model_dir=None,
       config=run_config,
-      train_batch_size=FLAGS.train_batch_size,
-      eval_batch_size=FLAGS.eval_batch_size,
-      predict_batch_size=FLAGS.predict_batch_size)
+      params=params,
+      warm_start_from=None)
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
