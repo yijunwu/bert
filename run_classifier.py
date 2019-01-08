@@ -34,11 +34,14 @@ from tensorflow.python.estimator import model_fn as model_fn_lib
 from tensorflow.python.estimator import estimator as estimator_lib
 from tensorflow.contrib.training.python.training import hparam
 
-#from importlib import reload
+from importlib import reload
 
-#import sys
-#reload(sys)
-#sys.setdefaultencoding('utf8')
+import sys
+
+if not (sys.version_info > (3, 0)):
+  # Python 2 code in this block
+  reload(sys)
+  sys.setdefaultencoding('utf8')
 
 flags = tf.flags
 
