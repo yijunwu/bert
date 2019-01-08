@@ -28,20 +28,29 @@ import tokenization
 import tensorflow as tf
 import re
 import html2text
+import io
 
 from tensorflow.python.estimator import run_config as run_config_lib
 from tensorflow.python.estimator import model_fn as model_fn_lib
 from tensorflow.python.estimator import estimator as estimator_lib
 from tensorflow.contrib.training.python.training import hparam
 
-from importlib import reload
-
 import sys
 
-if not (sys.version_info > (3, 0)):
-  # Python 2 code in this block
+if (sys.version_info >= (3, 4)):
+  print('Python 3.4 and above')
+  import importlib
+  importlib.reload(sys)
+elif (sys.version_info >= (3, 0)):
+  print('Python 3.x(<3.4)')
+  import imp
+  imp.reload(sys)
+  sys.setdefaultencoding('utf8')
+else:
+  print('Pyton 2')
   reload(sys)
   sys.setdefaultencoding('utf8')
+
 
 flags = tf.flags
 
@@ -213,6 +222,7 @@ class DataProcessor(object):
   @classmethod
   def _read_tsv(cls, input_file, quotechar=None):
     """Reads a tab separated value file."""
+    # with io.open(input_file, "r", encoding="utf-8") as f:
     with tf.gfile.Open(input_file, "r") as f:
       reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
       lines = []
@@ -990,8 +1000,8 @@ def main(_):
       model_fn=model_fn,
       model_dir=None,
       config=run_config,
-      params=params,
-      warm_start_from=None)
+      params=params,)
+      #warm_start_from=None)
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
