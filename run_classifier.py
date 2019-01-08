@@ -903,6 +903,8 @@ def _add_item_to_params(params, key, value):
         params[key] = value
 
 def main(_):
+  tf.logging.info("Checking volume dir ...")
+  os.system("ls /volumes/data_1")
   tf.logging.set_verbosity(tf.logging.INFO)
 
   processors = {
