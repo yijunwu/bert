@@ -373,6 +373,32 @@ class IcbuTicketsProcessor(DataProcessor):
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "test")
 
+    def get_test_examples_with_label(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "dev")
+
+    def get_test_results(self, data_dir):
+        """See base class."""
+        return self._read_tsv(os.path.join(data_dir, "test_results.tsv"))
+
+    def get_test_result(self, index):
+        """See base class."""
+        results = self._read_tsv(os.path.join("pai_output_512", "test_results.tsv"))
+        return results[index]
+
+    def get_all_labels(self, data_dir):
+        """See base class."""
+        if not hasattr(self, 'labels'):
+            lines = self._read_tsv(os.path.join(data_dir, "icbu_tickets_labels.tsv"))
+            self.labels = []
+            for (i, line) in enumerate(lines):
+                if i == 0:
+                    continue
+                self.labels.append(tokenization.convert_to_unicode(line[0]))
+
+        return self.labels
+
     def get_labels(self):
         """See base class."""
         if not hasattr(self, 'labels'):
@@ -392,7 +418,7 @@ class IcbuTicketsProcessor(DataProcessor):
             if i == 0:
                 continue
             guid = "%s-%s" % (set_type, i)
-            text_a = tokenization.convert_to_unicode(self._html2text(line[5]))
+            text_a = tokenization.convert_to_unicode(self.html2text(line[5]))
             #text_b = tokenization.convert_to_unicode(line[9])
             if set_type == "test":
                 label = "ICBU/ICBU"
@@ -402,7 +428,7 @@ class IcbuTicketsProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 
-    def _html2text(self, line):
+    def html2text(self, line):
         text = html2text.html2text(line)
         html_keys = ["font-size:.{0,20}?;", "line-height:.{0,20}?;", "font-family:.{0,20}?;",
                      "vertical-align:.{0,20}?;", "color:.{0,20}?;", "margin:.{0,20}?;",
