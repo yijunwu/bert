@@ -418,7 +418,7 @@ class IcbuTicketsProcessor(DataProcessor):
             if i == 0:
                 continue
             guid = "%s-%s" % (set_type, i)
-            text_a = tokenization.convert_to_unicode(self.html2text(line[5]))
+            text_a = tokenization.convert_to_unicode(_html2text(line[5]))
             #text_b = tokenization.convert_to_unicode(line[9])
             if set_type == "test":
                 label = "ICBU/ICBU"
@@ -428,52 +428,128 @@ class IcbuTicketsProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 
-    def html2text(self, line):
-        text = html2text.html2text(line)
-        html_attr_value_expr = "[ :,\)\(\-a-zA-Z0-9\"\n]+"
-        html_keys = ["font-size:" + html_attr_value_expr,
-                     "line-height:" + html_attr_value_expr,
-                     "font-family:" + html_attr_value_expr,
-                     "vertical-align:" + html_attr_value_expr,
-                     "color:" + html_attr_value_expr,
-                     "margin:" + html_attr_value_expr,
-                     "padding:" + html_attr_value_expr,
-                     "border:" + html_attr_value_expr,
-                     "font-style:" + html_attr_value_expr,
-                     "font-variant:" + html_attr_value_expr,
-                     "font-weight:" + html_attr_value_expr,
-                     "font-stretch:" + html_attr_value_expr,
-                     "font-size:" + html_attr_value_expr,
-                     "line-height:" + html_attr_value_expr,
-                     "font-family:" + html_attr_value_expr,
-                     "vertical-align:" + html_attr_value_expr,
-                     "style:" + html_attr_value_expr,
-                     "<span " + html_attr_value_expr,
-                     "<img .{0,200}?>",
-                     "!\[\]\(\)",
-                     "\[\]\(\)",
-                     "请务必提全相关信息（否则会影响工单处理时长），如信息不全一律退回，谢谢配合！"]
-        segments_to_replace = {"<br>": "。",
-                               "<br/>": "。",
-                               "<p>": "。",
-                               "</p>": "。",
-                               "[\n ]{2,10}": "\n",
-                               "\n\n\n\n": "\n",
-                               "\n\n\n": "\n",
-                               "\n\n": "\n",
-                               "。。。。": "。",
-                               "。。。": "。",
-                               "。。": "。",
-                               "。\n[\n 。]{1,10}": "。\n",}
-        for (i, expr) in enumerate(html_keys):
-            p = re.compile(expr)
-            text = p.sub('', text)
 
-        for (i, expr) in enumerate(segments_to_replace.keys()):
-            p = re.compile(expr)
-            text = p.sub(segments_to_replace[expr], text)
+class IcbuTicketsBinaryProcessor(DataProcessor):
+    """Processor for the Icbu tickets data set."""
 
-        return text
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_train.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "test")
+
+    def get_test_examples_with_label(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "dev")
+
+    def get_test_results(self, data_dir):
+        """See base class."""
+        return self._read_tsv(os.path.join(data_dir, "test_results.tsv"))
+
+    def get_test_result(self, index):
+        """See base class."""
+        results = self._read_tsv(os.path.join("pai_output_512", "test_results.tsv"))
+        return results[index]
+
+    def get_all_labels(self, data_dir):
+        """See base class."""
+        if not hasattr(self, 'labels'):
+            lines = self._read_tsv(os.path.join(data_dir, "icbu_tickets_labels.tsv"))
+            self.labels = []
+            for (i, line) in enumerate(lines):
+                if i == 0:
+                    continue
+                self.labels.append(tokenization.convert_to_unicode(line[0]))
+
+        return self.labels
+
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            guid = "%s-%s" % (set_type, i)
+            text_a = tokenization.convert_to_unicode(_html2text(line[5]))
+            text_b = tokenization.convert_to_unicode(line[9])
+
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=text_b, label="1"))
+
+            sample_indexes = random.sample(range(len(mylist)), sample_size)
+            for label_as_text_b in self.get_all_labels(FLAGS.data_dir):
+                if set_type == "test":
+                    label = "0"
+                elif label_as_text_b == text_b:
+                    label = "1"
+                else:
+                    label = "0"
+                examples.append(
+                    InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+
+        return examples
+
+
+def _html2text(line):
+    text = html2text.html2text(line)
+    html_attr_value_expr = "[ :,\)\(\-a-zA-Z0-9\"\n]+"
+    html_keys = ["font-size:" + html_attr_value_expr,
+                 "line-height:" + html_attr_value_expr,
+                 "font-family:" + html_attr_value_expr,
+                 "vertical-align:" + html_attr_value_expr,
+                 "color:" + html_attr_value_expr,
+                 "margin:" + html_attr_value_expr,
+                 "padding:" + html_attr_value_expr,
+                 "border:" + html_attr_value_expr,
+                 "font-style:" + html_attr_value_expr,
+                 "font-variant:" + html_attr_value_expr,
+                 "font-weight:" + html_attr_value_expr,
+                 "font-stretch:" + html_attr_value_expr,
+                 "font-size:" + html_attr_value_expr,
+                 "line-height:" + html_attr_value_expr,
+                 "font-family:" + html_attr_value_expr,
+                 "vertical-align:" + html_attr_value_expr,
+                 "style:" + html_attr_value_expr,
+                 "<span " + html_attr_value_expr,
+                 "<img .{0,200}?>",
+                 "!\[\]\(\)",
+                 "\[\]\(\)",
+                 "请务必提全相关信息（否则会影响工单处理时长），如信息不全一律退回，谢谢配合！"]
+    segments_to_replace = {"<br>": "。",
+                           "<br/>": "。",
+                           "<p>": "。",
+                           "</p>": "。",
+                           "[\n ]{2,10}": "\n",
+                           "\n\n\n\n": "\n",
+                           "\n\n\n": "\n",
+                           "\n\n": "\n",
+                           "。。。。": "。",
+                           "。。。": "。",
+                           "。。": "。",
+                           "。\n[\n 。]{1,10}": "。\n",}
+    for (i, expr) in enumerate(html_keys):
+        p = re.compile(expr)
+        text = p.sub('', text)
+
+    for (i, expr) in enumerate(segments_to_replace.keys()):
+        p = re.compile(expr)
+        text = p.sub(segments_to_replace[expr], text)
+
+    return text
 
 class ColaProcessor(DataProcessor):
   """Processor for the CoLA data set (GLUE version)."""
@@ -933,6 +1009,7 @@ def main(_):
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
       "icbu-tickets": IcbuTicketsProcessor,
+      "icbu-tickets-binary": IcbuTicketsBinaryProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
