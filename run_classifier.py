@@ -28,6 +28,7 @@ import tensorflow as tf
 import re
 import html2text
 import io
+import numpy as np
 
 
 import sys
@@ -480,26 +481,41 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
+        positive_count = 100
+        negative_count = 100
+
+        all_labels = self.get_all_labels(FLAGS.data_dir)
+
         for (i, line) in enumerate(lines):
             if i == 0:
                 continue
-            guid = "%s-%s" % (set_type, i)
+            #guid = "%s-%s" % (set_type, i)
             text_a = tokenization.convert_to_unicode(_html2text(line[5]))
             text_b = tokenization.convert_to_unicode(line[9])
 
-            examples.append(
-                InputExample(guid=guid, text_a=text_a, text_b=text_b, label="1"))
+            if set_type == "test":
+                for index in range(len(all_labels)):
+                    guid = "%s-%s" % (set_type, i * 1000 + index)
+                    label_as_text_b = all_labels[index]
+                    label = "0"
+                    examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+            else:
+                for j in range(positive_count):
+                    guid = "%s-%s" % (set_type, i * 1000 + j)
+                    examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=text_b, label="1"))
 
-            sample_indexes = random.sample(range(len(mylist)), sample_size)
-            for label_as_text_b in self.get_all_labels(FLAGS.data_dir):
-                if set_type == "test":
-                    label = "0"
-                elif label_as_text_b == text_b:
-                    label = "1"
-                else:
-                    label = "0"
-                examples.append(
-                    InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+                sample_indexes = np.random.randint(0, len(all_labels), negative_count)
+                for index in sample_indexes:
+                    guid = "%s-%s" % (set_type, i * 1000 + positive_count + index)
+                    label_as_text_b = all_labels[index]
+                    if label_as_text_b == text_b:
+                        label = "1"
+                    else:
+                        label = "0"
+                    examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
 
         return examples
 
