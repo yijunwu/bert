@@ -29,7 +29,7 @@ import re
 import html2text
 import io
 import numpy as np
-
+from random import shuffle
 
 import sys
 
@@ -462,6 +462,22 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
         results = self._read_tsv(os.path.join("pai_output_512", "test_results.tsv"))
         return results[index]
 
+    def process_test_results(self, data_dir):
+        processed_result = []
+        results = self._read_tsv(os.path.join(data_dir, "test_results.tsv"))
+        for i in range(int(len(results) / 330)):
+            processed_result.append([])
+            for j in range(330):
+                processed_result[i].append(results[i * 330 + j][1])
+
+        output_result_file = os.path.join(data_dir, "test_results_processed.txt")
+
+        with tf.gfile.GFile(output_result_file, "w") as writer:
+            for i in range(len(processed_result)):
+                writer.write("\t".join(processed_result[i]) + '\n')
+        return
+
+
     def get_all_labels(self, data_dir):
         """See base class."""
         if not hasattr(self, 'labels'):
@@ -481,8 +497,8 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
-        positive_count = 100
-        negative_count = 100
+        positive_count = 330
+        negative_count = 330
 
         all_labels = self.get_all_labels(FLAGS.data_dir)
 
@@ -493,29 +509,41 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
             text_a = tokenization.convert_to_unicode(_html2text(line[5]))
             text_b = tokenization.convert_to_unicode(line[9])
 
+            binary_examples = []
+
             if set_type == "test":
                 for index in range(len(all_labels)):
                     guid = "%s-%s" % (set_type, i * 1000 + index)
                     label_as_text_b = all_labels[index]
                     label = "0"
-                    examples.append(
+                    binary_examples.append(
                         InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
             else:
                 for j in range(positive_count):
                     guid = "%s-%s" % (set_type, i * 1000 + j)
-                    examples.append(
+                    binary_examples.append(
                         InputExample(guid=guid, text_a=text_a, text_b=text_b, label="1"))
 
-                sample_indexes = np.random.randint(0, len(all_labels), negative_count)
-                for index in sample_indexes:
+                #sample_indexes = np.random.randint(0, len(all_labels), negative_count)
+                #sample_indexes = np.random.permutation(negative_count)
+                for index in range(negative_count):
                     guid = "%s-%s" % (set_type, i * 1000 + positive_count + index)
                     label_as_text_b = all_labels[index]
                     if label_as_text_b == text_b:
                         label = "1"
                     else:
                         label = "0"
-                    examples.append(
+                    binary_examples.append(
                         InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+
+                binary_examples_indexes = np.random.permutation(len(binary_examples))
+                binary_examples = [binary_examples[j] for j in binary_examples_indexes]
+
+            examples.extend(binary_examples)
+            #examples.append(binary_examples[binary_examples_indexes])
+
+        if set_type == "train":
+            shuffle(examples)
 
         return examples
 

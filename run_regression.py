@@ -188,11 +188,13 @@ class InputFeatures(object):
                input_mask,
                segment_ids,
                label_id,
+               label_elements,
                is_real_example=True):
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.segment_ids = segment_ids
     self.label_id = label_id
+    self.label_elements = label_elements
     self.is_real_example = is_real_example
 
 
@@ -548,6 +550,132 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
         return examples
 
 
+class IcbuTicketsRegressionProcessor(DataProcessor):
+    """Processor for the Icbu tickets data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_train.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "test")
+
+    def get_test_examples_with_label(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "dev")
+
+    def get_test_results(self, data_dir):
+        """See base class."""
+        return self._read_tsv(os.path.join(data_dir, "test_results.tsv"))
+
+    def get_test_result(self, index):
+        """See base class."""
+        results = self._read_tsv(os.path.join("pai_output_512", "test_results.tsv"))
+        return results[index]
+
+    def process_test_results(self, data_dir):
+        processed_result = []
+        results = self._read_tsv(os.path.join(data_dir, "test_results.tsv"))
+        for i in range(int(len(results) / 330)):
+            processed_result.append([])
+            for j in range(330):
+                processed_result[i].append(results[i * 330 + j][1])
+
+        output_result_file = os.path.join(data_dir, "test_results_processed.txt")
+
+        with tf.gfile.GFile(output_result_file, "w") as writer:
+            for i in range(len(processed_result)):
+                writer.write("\t".join(processed_result[i]) + '\n')
+        return
+
+
+    def get_all_labels(self, data_dir):
+        """See base class."""
+        if not hasattr(self, 'labels'):
+            lines = self._read_tsv(os.path.join(data_dir, "icbu_tickets_labels.tsv"))
+            self.labels = []
+            for (i, line) in enumerate(lines):
+                if i == 0:
+                    continue
+                self.labels.append(tokenization.convert_to_unicode(line[0]))
+
+        return self.labels
+
+    def get_labels(self):
+        """See base class."""
+        if not hasattr(self, 'labels'):
+            lines = self._read_tsv(os.path.join(FLAGS.data_dir, "icbu_tickets_labels.tsv"))
+            self.labels = []
+            for (i, line) in enumerate(lines):
+                if i == 0:
+                    continue
+                self.labels.append(tokenization.convert_to_unicode(line[0]))
+
+        return self.labels
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        positive_count = 330
+        negative_count = 330
+
+        all_labels = self.get_all_labels(FLAGS.data_dir)
+
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            #guid = "%s-%s" % (set_type, i)
+            text_a = tokenization.convert_to_unicode(_html2text(line[5]))
+            text_b = tokenization.convert_to_unicode(line[9])
+
+            binary_examples = []
+
+            if set_type == "test":
+                for index in range(len(all_labels)):
+                    guid = "%s-%s" % (set_type, i * 1000 + index)
+                    label_as_text_b = all_labels[index]
+                    label = "0"
+                    binary_examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+            else:
+                for j in range(positive_count):
+                    guid = "%s-%s" % (set_type, i * 1000 + j)
+                    binary_examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=text_b, label="1"))
+
+                #sample_indexes = np.random.randint(0, len(all_labels), negative_count)
+                #sample_indexes = np.random.permutation(negative_count)
+                for index in range(negative_count):
+                    guid = "%s-%s" % (set_type, i * 1000 + positive_count + index)
+                    label_as_text_b = all_labels[index]
+                    if label_as_text_b == text_b:
+                        label = "1"
+                    else:
+                        label = "0"
+                    binary_examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+
+                binary_examples_indexes = np.random.permutation(len(binary_examples))
+                binary_examples = [binary_examples[j] for j in binary_examples_indexes]
+
+            examples.extend(binary_examples)
+            #examples.append(binary_examples[binary_examples_indexes])
+
+        if set_type == "train":
+            shuffle(examples)
+
+        return examples
+
+
 def _html2text(line):
     text = html2text.html2text(line)
     html_attr_value_expr = "[ :,\)\(\-a-zA-Z0-9\"\n]+"
@@ -636,6 +764,10 @@ class ColaProcessor(DataProcessor):
     return examples
 
 
+def bert_embedding(label):
+    pass
+
+
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
   """Converts a single `InputExample` into a single `InputFeatures`."""
@@ -646,11 +778,14 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
         input_mask=[0] * max_seq_length,
         segment_ids=[0] * max_seq_length,
         label_id=0,
+        label_elements=[0] * 768, #TODO wuyijun 待优化
         is_real_example=False)
 
-  label_map = {}
+  label_id_map = {}
+  label_elements_map = {}
   for (i, label) in enumerate(label_list):
-    label_map[label] = i
+    label_id_map[label] = i
+    label_elements_map[label] = bert_embedding(label)
 
   tokens_a = tokenizer.tokenize(example.text_a)
   tokens_b = None
@@ -718,7 +853,8 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
   assert len(input_mask) == max_seq_length
   assert len(segment_ids) == max_seq_length
 
-  label_id = label_map[example.label]
+  label_id = label_id_map[example.label]
+  label_elements = label_elements_map[example.label]
   if ex_index < 5:
     tf.logging.info("*** Example ***")
     tf.logging.info("guid: %s" % (example.guid))
@@ -727,13 +863,14 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     tf.logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
     tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
     tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-    tf.logging.info("label: %s (id = %d)" % (example.label, label_id))
+    tf.logging.info("label: %s (id = %d) (elements = [%s ...]" % (example.label, label_id, label_elements[0]))
 
   feature = InputFeatures(
       input_ids=input_ids,
       input_mask=input_mask,
       segment_ids=segment_ids,
       label_id=label_id,
+      label_elements=label_elements,
       is_real_example=True)
   return feature
 
@@ -755,11 +892,16 @@ def file_based_convert_examples_to_features(
       f = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
       return f
 
+    def create_float_feature(values):
+        f = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
+        return f
+
     features = collections.OrderedDict()
     features["input_ids"] = create_int_feature(feature.input_ids)
     features["input_mask"] = create_int_feature(feature.input_mask)
     features["segment_ids"] = create_int_feature(feature.segment_ids)
     features["label_ids"] = create_int_feature([feature.label_id])
+    features["label_elements"] = create_float_feature(feature.label_elements)
     features["is_real_example"] = create_int_feature(
         [int(feature.is_real_example)])
 
@@ -777,6 +919,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
       "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
       "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
       "label_ids": tf.FixedLenFeature([], tf.int64),
+      "label_elements": tf.FixedLenFeature([], tf.float32),
       "is_real_example": tf.FixedLenFeature([], tf.int64),
   }
 
@@ -833,8 +976,8 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
       tokens_b.pop()
 
 
-def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
-                 labels, num_labels, use_one_hot_embeddings):
+def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
+                 label_elements, num_labels, use_one_hot_embeddings):
   """Creates a classification model."""
   model = modeling.BertModel(
       config=bert_config,
@@ -868,17 +1011,17 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     logits = tf.matmul(output_layer, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
 
+    per_example_similarity_loss = tf.losses.cosine_distance(label_elements, logits)
 
+    #probabilities = tf.nn.softmax(logits, axis=-1)
+    #log_probs = tf.nn.log_softmax(logits, axis=-1)
 
-    probabilities = tf.nn.softmax(logits, axis=-1)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
+    #one_hot_labels = tf.one_hot(label_elements, depth=num_labels, dtype=tf.float32)
 
-    one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
+    #per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
+    loss = tf.reduce_mean(per_example_similarity_loss)
 
-    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
-    loss = tf.reduce_mean(per_example_loss)
-
-    return (loss, per_example_loss, logits, probabilities)
+    return (loss, per_example_similarity_loss, logits)
 
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
@@ -897,6 +1040,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
     label_ids = features["label_ids"]
+    label_elements = features["label_elements"]
     is_real_example = None
     if "is_real_example" in features:
       is_real_example = tf.cast(features["is_real_example"], dtype=tf.float32)
@@ -905,8 +1049,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-    (total_loss, per_example_loss, logits, probabilities) = create_model(
-        bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
+    (total_loss, per_example_loss, logits) = create_model(
+        bert_config, is_training, input_ids, input_mask, segment_ids, label_ids, label_elements,
         num_labels, use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
@@ -957,7 +1101,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         }
 
       eval_metrics = (metric_fn,
-                      [per_example_loss, label_ids, logits, is_real_example])
+                      [per_example_loss, label_elements, logits, is_real_example])
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
@@ -966,7 +1110,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     else:
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
-          predictions={"probabilities": probabilities},
+          predictions={"similarity_loss": per_example_loss},
           scaffold_fn=scaffold_fn)
     return output_spec
 
@@ -1230,12 +1374,13 @@ def main(_):
       num_written_lines = 0
       tf.logging.info("***** Predict results *****")
       for (i, prediction) in enumerate(result):
-        probabilities = prediction["probabilities"]
+        similarity_loss = prediction["similarity_loss"]
         if i >= num_actual_predict_examples:
           break
         output_line = "\t".join(
             str(class_probability)
-            for class_probability in probabilities) + "\n"
+            #TODO wuyijun 遍历所有分类
+            for class_probability in similarity_loss) + "\n"
         writer.write(output_line)
         num_written_lines += 1
     assert num_written_lines == num_actual_predict_examples
