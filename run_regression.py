@@ -989,7 +989,13 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     tf.logging.info("logists shape: %s" % tf.shape(logits))
     expanded_labels_elements = tf.tile(tf.expand_dims(labels_elements, axis=0), [tf.shape(logits)[0], 1, 1])
     similarity_accross_all_classes = tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(expanded_labels_elements, -1), tf.nn.l2_normalize(expanded_logits, -1)), axis = -1)
+    #print_output = tf.print(similarity_accross_all_classes, [similarity_accross_all_classes], summarize=-1)
+    #with tf.control_dependencies([print_output]):
     probabilities = tf.nn.softmax(similarity_accross_all_classes, axis=-1)
+
+    #probabilities_print_output = tf.print(probabilities, [probabilities], summarize=-1)
+    #with tf.control_dependencies([probabilities_print_output]):
+    #  probabilities = probabilities
     #probabilities = tf.constant(1.0/num_labels, shape=[FLAGS.predict_batch_size, num_labels])
     #log_probs = tf.nn.log_softmax(logits, axis=-1)
 
