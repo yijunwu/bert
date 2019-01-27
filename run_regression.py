@@ -981,7 +981,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
 
     from tensorflow.python.ops.losses.losses_impl import Reduction
     #per_example_similarity_loss = tf.losses.cosine_distance(tf.nn.l2_normalize(label_elements, -1), tf.nn.l2_normalize(logits, -1), axis = -1, reduction = Reduction.NONE)
-    per_example_similarity_loss = -tf.exp(tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(label_elements, -1), tf.nn.l2_normalize(logits, -1)), axis = -1))
+    per_example_similarity_loss = tf.exp(-tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(label_elements, -1), tf.nn.l2_normalize(logits, -1)), axis = -1))
 
     #probabilities = tf.nn.softmax(logits, axis=-1)
     # 第1维（0-based）是类的个数
