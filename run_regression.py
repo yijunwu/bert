@@ -987,8 +987,8 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     # 第1维（0-based）是类的个数
     expanded_logits = tf.tile(tf.expand_dims(logits, axis=1), [1, num_labels, 1])
     tf.logging.info("logists shape: %s" % tf.shape(logits))
-    expanded_labels_elements = tf.tile(tf.expand_dims(labels_elements, axis=0), [FLAGS.predict_batch_size, 1, 1])
-    similarity_accross_all_classes = tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(labels_elements, -1), tf.nn.l2_normalize(expanded_logits, -1)), axis = -1)
+    expanded_labels_elements = tf.tile(tf.expand_dims(labels_elements, axis=0), [tf.shape(logits)[0], 1, 1])
+    similarity_accross_all_classes = tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(expanded_labels_elements, -1), tf.nn.l2_normalize(expanded_logits, -1)), axis = -1)
     probabilities = tf.nn.softmax(similarity_accross_all_classes, axis=-1)
     #probabilities = tf.constant(1.0/num_labels, shape=[FLAGS.predict_batch_size, num_labels])
     #log_probs = tf.nn.log_softmax(logits, axis=-1)
