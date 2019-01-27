@@ -991,7 +991,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     similarity_accross_all_classes = tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(expanded_labels_elements, -1), tf.nn.l2_normalize(expanded_logits, -1)), axis = -1)
     #print_output = tf.print(similarity_accross_all_classes, [similarity_accross_all_classes], summarize=-1)
     #with tf.control_dependencies([print_output]):
-    probabilities = tf.nn.softmax(similarity_accross_all_classes, axis=-1)
+    #### probabilities = tf.nn.softmax(similarity_accross_all_classes, axis=-1)
 
     #probabilities_print_output = tf.print(probabilities, [probabilities], summarize=-1)
     #with tf.control_dependencies([probabilities_print_output]):
@@ -1002,9 +1002,17 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     #one_hot_labels = tf.one_hot(label_elements, depth=num_labels, dtype=tf.float32)
 
     #per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
-    loss = tf.reduce_mean(per_example_similarity_loss)
+    ##### loss = tf.reduce_mean(per_example_similarity_loss)
 
-    return (loss, per_example_similarity_loss, logits, probabilities)
+    probabilities = tf.nn.softmax(similarity_accross_all_classes, axis=-1)
+    log_probs = tf.nn.log_softmax(similarity_accross_all_classes, axis=-1)
+
+    one_hot_labels = tf.one_hot(label_ids, depth=num_labels, dtype=tf.float32)
+
+    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
+    loss = tf.reduce_mean(per_example_loss)
+
+    return (loss, per_example_loss, logits, probabilities)
 
 
 def model_fn_builder(bert_config, num_labels, labels_elements, init_checkpoint, learning_rate,
