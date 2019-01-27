@@ -945,7 +945,7 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
-                 label_elements, num_labels, use_one_hot_embeddings):
+                 label_elements, num_labels, labels_elements, use_one_hot_embeddings):
   """Creates a classification model."""
   model = modeling.BertModel(
       config=bert_config,
@@ -979,10 +979,18 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     logits = tf.matmul(output_layer, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
 
-    per_example_similarity_loss = tf.losses.cosine_distance(label_elements, logits, axis = 0)
+    from tensorflow.python.ops.losses.losses_impl import Reduction
+    #per_example_similarity_loss = tf.losses.cosine_distance(tf.nn.l2_normalize(label_elements, -1), tf.nn.l2_normalize(logits, -1), axis = -1, reduction = Reduction.NONE)
+    per_example_similarity_loss = -tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(label_elements, -1), tf.nn.l2_normalize(logits, -1)), axis = -1)
 
     #probabilities = tf.nn.softmax(logits, axis=-1)
-    probabilities = tf.constant(1.0/330, shape=[FLAGS.predict_batch_size, 330])
+    # 第1维（0-based）是类的个数
+    expanded_logits = tf.tile(tf.expand_dims(logits, axis=1), [1, num_labels, 1])
+    tf.logging.info("logists shape: %s" % tf.shape(logits))
+    expanded_labels_elements = tf.tile(tf.expand_dims(labels_elements, axis=0), [FLAGS.predict_batch_size, 1, 1])
+    similarity_accross_all_classes = tf.reduce_sum(tf.multiply(tf.nn.l2_normalize(labels_elements, -1), tf.nn.l2_normalize(expanded_logits, -1)), axis = -1)
+    probabilities = tf.nn.softmax(similarity_accross_all_classes, axis=-1)
+    #probabilities = tf.constant(1.0/num_labels, shape=[FLAGS.predict_batch_size, num_labels])
     #log_probs = tf.nn.log_softmax(logits, axis=-1)
 
     #one_hot_labels = tf.one_hot(label_elements, depth=num_labels, dtype=tf.float32)
@@ -993,7 +1001,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     return (loss, per_example_similarity_loss, logits, probabilities)
 
 
-def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
+def model_fn_builder(bert_config, num_labels, labels_elements, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
   """Returns `model_fn` closure for TPUEstimator."""
@@ -1020,7 +1028,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     (total_loss, per_example_loss, logits, probabilities) = create_model(
         bert_config, is_training, input_ids, input_mask, segment_ids, label_ids, label_elements,
-        num_labels, use_one_hot_embeddings)
+        num_labels, labels_elements, use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
     initialized_variable_names = {}
@@ -1059,10 +1067,10 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
           scaffold_fn=scaffold_fn)
     elif mode == tf.estimator.ModeKeys.EVAL:
 
-      def metric_fn(per_example_loss, label_ids, label_elements, logits, is_real_example):
+      def metric_fn(per_example_loss, label_ids, label_elements, logits, probabilities, is_real_example):
         tf.logging.info("Shape of parameters per_example_loss: %s, label_ids: %s, label_elements: %s, logits: %s, is_real_example: %s"
                         % (tf.shape(per_example_loss), tf.shape(label_ids), tf.shape(label_elements), tf.shape(logits), tf.shape(is_real_example)))
-        predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
+        predictions = tf.argmax(probabilities, axis=-1, output_type=tf.int32)
         #predictions = matches_most(logits, axis=-1, label_elements=label_elements, output_type=tf.int32)
         accuracy = tf.metrics.accuracy(
             labels=label_ids, predictions=predictions, weights=is_real_example)
@@ -1073,7 +1081,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         }
 
       eval_metrics = (metric_fn,
-                      [per_example_loss, label_ids, label_elements, logits, is_real_example])
+                      [per_example_loss, label_ids, label_elements, logits, probabilities, is_real_example])
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
@@ -1212,6 +1220,10 @@ def main(_):
 
   label_list = processor.get_labels()
 
+  bc = BertClient()
+  #labels_elements = [[0.0] * 768] * 330
+  labels_elements = bc.encode(label_list)
+
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
@@ -1243,6 +1255,7 @@ def main(_):
   model_fn = model_fn_builder(
       bert_config=bert_config,
       num_labels=len(label_list),
+      labels_elements=labels_elements,
       init_checkpoint=FLAGS.init_checkpoint,
       learning_rate=FLAGS.learning_rate,
       num_train_steps=num_train_steps,
