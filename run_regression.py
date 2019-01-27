@@ -32,6 +32,7 @@ import numpy as np
 from random import shuffle
 
 import sys
+from bert_serving.client import BertClient
 
 if (sys.version_info >= (3, 4)):
   print('Python 3.4 and above')
@@ -625,54 +626,18 @@ class IcbuTicketsRegressionProcessor(DataProcessor):
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
-        positive_count = 330
-        negative_count = 330
-
-        all_labels = self.get_all_labels(FLAGS.data_dir)
-
         for (i, line) in enumerate(lines):
             if i == 0:
                 continue
-            #guid = "%s-%s" % (set_type, i)
+            guid = "%s-%s" % (set_type, i)
             text_a = tokenization.convert_to_unicode(_html2text(line[5]))
-            text_b = tokenization.convert_to_unicode(line[9])
-
-            binary_examples = []
-
+            #text_b = tokenization.convert_to_unicode(line[9])
             if set_type == "test":
-                for index in range(len(all_labels)):
-                    guid = "%s-%s" % (set_type, i * 1000 + index)
-                    label_as_text_b = all_labels[index]
-                    label = "0"
-                    binary_examples.append(
-                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+                label = "ICBU/ICBU"
             else:
-                for j in range(positive_count):
-                    guid = "%s-%s" % (set_type, i * 1000 + j)
-                    binary_examples.append(
-                        InputExample(guid=guid, text_a=text_a, text_b=text_b, label="1"))
-
-                #sample_indexes = np.random.randint(0, len(all_labels), negative_count)
-                #sample_indexes = np.random.permutation(negative_count)
-                for index in range(negative_count):
-                    guid = "%s-%s" % (set_type, i * 1000 + positive_count + index)
-                    label_as_text_b = all_labels[index]
-                    if label_as_text_b == text_b:
-                        label = "1"
-                    else:
-                        label = "0"
-                    binary_examples.append(
-                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
-
-                binary_examples_indexes = np.random.permutation(len(binary_examples))
-                binary_examples = [binary_examples[j] for j in binary_examples_indexes]
-
-            examples.extend(binary_examples)
-            #examples.append(binary_examples[binary_examples_indexes])
-
-        if set_type == "train":
-            shuffle(examples)
-
+                label = tokenization.convert_to_unicode(line[9])
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 
 
@@ -764,11 +729,11 @@ class ColaProcessor(DataProcessor):
     return examples
 
 
-def bert_embedding(label):
-    pass
+def bert_embedding(bc, label):
+    return bc.encode([label])[0].tolist()
 
 
-def convert_single_example(ex_index, example, label_list, max_seq_length,
+def convert_single_example(ex_index, example, label_id_map, label_elements_map, max_seq_length,
                            tokenizer):
   """Converts a single `InputExample` into a single `InputFeatures`."""
 
@@ -778,14 +743,8 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
         input_mask=[0] * max_seq_length,
         segment_ids=[0] * max_seq_length,
         label_id=0,
-        label_elements=[0] * 768, #TODO wuyijun 待优化
+        label_elements=[0.0] * 768, #TODO wuyijun 待优化
         is_real_example=False)
-
-  label_id_map = {}
-  label_elements_map = {}
-  for (i, label) in enumerate(label_list):
-    label_id_map[label] = i
-    label_elements_map[label] = bert_embedding(label)
 
   tokens_a = tokenizer.tokenize(example.text_a)
   tokens_b = None
@@ -849,12 +808,14 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     input_mask.append(0)
     segment_ids.append(0)
 
+  label_id = label_id_map[example.label]
+  label_elements = label_elements_map[example.label]
+
   assert len(input_ids) == max_seq_length
   assert len(input_mask) == max_seq_length
   assert len(segment_ids) == max_seq_length
+  assert len(label_elements) == 768
 
-  label_id = label_id_map[example.label]
-  label_elements = label_elements_map[example.label]
   if ex_index < 5:
     tf.logging.info("*** Example ***")
     tf.logging.info("guid: %s" % (example.guid))
@@ -881,11 +842,18 @@ def file_based_convert_examples_to_features(
 
   writer = tf.python_io.TFRecordWriter(output_file)
 
+  label_id_map = {}
+  label_elements_map = {}
+  bc = BertClient()
+  for (i, label) in enumerate(label_list):
+    label_id_map[label] = i
+    label_elements_map[label] = bert_embedding(bc, label)
+
   for (ex_index, example) in enumerate(examples):
     if ex_index % 10000 == 0:
       tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-    feature = convert_single_example(ex_index, example, label_list,
+    feature = convert_single_example(ex_index, example, label_id_map, label_elements_map,
                                      max_seq_length, tokenizer)
 
     def create_int_feature(values):
@@ -893,7 +861,7 @@ def file_based_convert_examples_to_features(
       return f
 
     def create_float_feature(values):
-        f = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
+        f = tf.train.Feature(float_list=tf.train.FloatList(value=values))
         return f
 
     features = collections.OrderedDict()
@@ -919,7 +887,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
       "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
       "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
       "label_ids": tf.FixedLenFeature([], tf.int64),
-      "label_elements": tf.FixedLenFeature([], tf.float32),
+      "label_elements": tf.FixedLenFeature([768], tf.float32),
       "is_real_example": tf.FixedLenFeature([], tf.int64),
   }
 
@@ -997,11 +965,11 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
   hidden_size = output_layer.shape[-1].value
 
   output_weights = tf.get_variable(
-      "output_weights", [num_labels, hidden_size],
+      "output_weights", [hidden_size, hidden_size],
       initializer=tf.truncated_normal_initializer(stddev=0.02))
 
   output_bias = tf.get_variable(
-      "output_bias", [num_labels], initializer=tf.zeros_initializer())
+      "output_bias", [hidden_size], initializer=tf.zeros_initializer())
 
   with tf.variable_scope("loss"):
     if is_training:
@@ -1011,9 +979,10 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     logits = tf.matmul(output_layer, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
 
-    per_example_similarity_loss = tf.losses.cosine_distance(label_elements, logits)
+    per_example_similarity_loss = tf.losses.cosine_distance(label_elements, logits, axis = 0)
 
     #probabilities = tf.nn.softmax(logits, axis=-1)
+    probabilities = tf.constant(1.0/330, shape=[FLAGS.predict_batch_size, 330])
     #log_probs = tf.nn.log_softmax(logits, axis=-1)
 
     #one_hot_labels = tf.one_hot(label_elements, depth=num_labels, dtype=tf.float32)
@@ -1021,7 +990,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     #per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
     loss = tf.reduce_mean(per_example_similarity_loss)
 
-    return (loss, per_example_similarity_loss, logits)
+    return (loss, per_example_similarity_loss, logits, probabilities)
 
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
@@ -1049,7 +1018,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-    (total_loss, per_example_loss, logits) = create_model(
+    (total_loss, per_example_loss, logits, probabilities) = create_model(
         bert_config, is_training, input_ids, input_mask, segment_ids, label_ids, label_elements,
         num_labels, use_one_hot_embeddings)
 
@@ -1090,8 +1059,11 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
           scaffold_fn=scaffold_fn)
     elif mode == tf.estimator.ModeKeys.EVAL:
 
-      def metric_fn(per_example_loss, label_ids, logits, is_real_example):
+      def metric_fn(per_example_loss, label_ids, label_elements, logits, is_real_example):
+        tf.logging.info("Shape of parameters per_example_loss: %s, label_ids: %s, label_elements: %s, logits: %s, is_real_example: %s"
+                        % (tf.shape(per_example_loss), tf.shape(label_ids), tf.shape(label_elements), tf.shape(logits), tf.shape(is_real_example)))
         predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
+        #predictions = matches_most(logits, axis=-1, label_elements=label_elements, output_type=tf.int32)
         accuracy = tf.metrics.accuracy(
             labels=label_ids, predictions=predictions, weights=is_real_example)
         loss = tf.metrics.mean(values=per_example_loss, weights=is_real_example)
@@ -1101,7 +1073,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         }
 
       eval_metrics = (metric_fn,
-                      [per_example_loss, label_elements, logits, is_real_example])
+                      [per_example_loss, label_ids, label_elements, logits, is_real_example])
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
@@ -1110,11 +1082,15 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     else:
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
-          predictions={"similarity_loss": per_example_loss},
+          predictions={"probabilities": probabilities},
           scaffold_fn=scaffold_fn)
     return output_spec
 
   return model_fn
+
+
+def matches_most(logits, axis, label_elements, output_type):
+  return [0] * 8
 
 
 # This function is not used by this file but is still used by the Colab and
@@ -1178,11 +1154,17 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
   """Convert a set of `InputExample`s to a list of `InputFeatures`."""
 
   features = []
+  label_id_map = {}
+  label_elements_map = {}
+  bc = BertClient()
+  for (i, label) in enumerate(label_list):
+    label_id_map[label] = i
+    label_elements_map[label] = bert_embedding(bc, label)
   for (ex_index, example) in enumerate(examples):
     if ex_index % 10000 == 0:
       tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-    feature = convert_single_example(ex_index, example, label_list,
+    feature = convert_single_example(ex_index, example, label_id_map, label_elements_map,
                                      max_seq_length, tokenizer)
 
     features.append(feature)
@@ -1201,6 +1183,7 @@ def main(_):
       "xnli": XnliProcessor,
       "icbu-tickets": IcbuTicketsProcessor,
       "icbu-tickets-binary": IcbuTicketsBinaryProcessor,
+      "icbu-tickets-regression": IcbuTicketsRegressionProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
@@ -1369,18 +1352,21 @@ def main(_):
 
     result = estimator.predict(input_fn=predict_input_fn)
 
+    tf.logging.info("**** Predict result**** %s" % result)
+
     output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
     with tf.gfile.GFile(output_predict_file, "w") as writer:
       num_written_lines = 0
       tf.logging.info("***** Predict results *****")
       for (i, prediction) in enumerate(result):
-        similarity_loss = prediction["similarity_loss"]
+        #similarity_loss = prediction["similarity_loss"]
+        probabilities = prediction["probabilities"]
         if i >= num_actual_predict_examples:
           break
         output_line = "\t".join(
             str(class_probability)
             #TODO wuyijun 遍历所有分类
-            for class_probability in similarity_loss) + "\n"
+            for class_probability in probabilities) + "\n"
         writer.write(output_line)
         num_written_lines += 1
     assert num_written_lines == num_actual_predict_examples
