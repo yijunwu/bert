@@ -607,7 +607,7 @@ class IcbuTicketsRegressionProcessor(DataProcessor):
             for (i, line) in enumerate(lines):
                 if i == 0:
                     continue
-                self.labels.append(tokenization.convert_to_unicode(line[0]))
+                self.labels.append(tokenization.convert_to_unicode(line[0].replace("ICBU/", "")))
 
         return self.labels
 
@@ -619,7 +619,7 @@ class IcbuTicketsRegressionProcessor(DataProcessor):
             for (i, line) in enumerate(lines):
                 if i == 0:
                     continue
-                self.labels.append(tokenization.convert_to_unicode(line[0]))
+                self.labels.append(tokenization.convert_to_unicode(line[0].replace("ICBU/", "")))
 
         return self.labels
 
@@ -633,9 +633,9 @@ class IcbuTicketsRegressionProcessor(DataProcessor):
             text_a = tokenization.convert_to_unicode(_html2text(line[5]))
             #text_b = tokenization.convert_to_unicode(line[9])
             if set_type == "test":
-                label = "ICBU/ICBU"
+                label = "ICBU"
             else:
-                label = tokenization.convert_to_unicode(line[9])
+                label = tokenization.convert_to_unicode(line[9].replace("ICBU/", ""))
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
