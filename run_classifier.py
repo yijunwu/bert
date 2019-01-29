@@ -30,6 +30,7 @@ import html2text
 import io
 import numpy as np
 from random import shuffle
+import random
 
 import sys
 
@@ -486,7 +487,7 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
             for (i, line) in enumerate(lines):
                 if i == 0:
                     continue
-                self.labels.append(tokenization.convert_to_unicode(line[0]))
+                self.labels.append(tokenization.convert_to_unicode(line[0].replace("ICBU/", "")))
 
         return self.labels
 
@@ -497,44 +498,45 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
         examples = []
-        positive_count = 330
-        negative_count = 330
+        positive_count = 10
+        negative_count = 10
 
-        all_labels = self.get_all_labels(FLAGS.data_dir)
+        all_classes = self.get_all_labels(FLAGS.data_dir)
 
         for (i, line) in enumerate(lines):
             if i == 0:
                 continue
             #guid = "%s-%s" % (set_type, i)
             text_a = tokenization.convert_to_unicode(_html2text(line[5]))
-            text_b = tokenization.convert_to_unicode(line[9])
+            text_b = tokenization.convert_to_unicode(line[9].replace("ICBU/", ""))
 
             binary_examples = []
 
             if set_type == "test":
-                for index in range(len(all_labels)):
+                for index in range(len(all_classes)):
                     guid = "%s-%s" % (set_type, i * 1000 + index)
-                    label_as_text_b = all_labels[index]
+                    class_as_text_b = all_classes[index].replace("ICBU/", "")
                     label = "0"
                     binary_examples.append(
-                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+                        InputExample(guid=guid, text_a=text_a, text_b=class_as_text_b, label=label))
             else:
                 for j in range(positive_count):
                     guid = "%s-%s" % (set_type, i * 1000 + j)
                     binary_examples.append(
-                        InputExample(guid=guid, text_a=text_a, text_b=text_b, label="1"))
+                        InputExample(guid=guid, text_a=text_a, text_b=text_b.replace("ICBU/", ""), label="1"))
 
                 #sample_indexes = np.random.randint(0, len(all_labels), negative_count)
                 #sample_indexes = np.random.permutation(negative_count)
-                for index in range(negative_count):
+                sample_indexes = random.sample(range(len(all_classes)), negative_count)
+                for index in sample_indexes:
                     guid = "%s-%s" % (set_type, i * 1000 + positive_count + index)
-                    label_as_text_b = all_labels[index]
-                    if label_as_text_b == text_b:
+                    class_as_text_b = all_classes[index].replace("ICBU/", "")
+                    if class_as_text_b == text_b:
                         label = "1"
                     else:
                         label = "0"
                     binary_examples.append(
-                        InputExample(guid=guid, text_a=text_a, text_b=label_as_text_b, label=label))
+                        InputExample(guid=guid, text_a=text_a, text_b=class_as_text_b, label=label))
 
                 binary_examples_indexes = np.random.permutation(len(binary_examples))
                 binary_examples = [binary_examples[j] for j in binary_examples_indexes]
@@ -542,8 +544,8 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
             examples.extend(binary_examples)
             #examples.append(binary_examples[binary_examples_indexes])
 
-        if set_type == "train":
-            shuffle(examples)
+        #if set_type == "train":
+        #    shuffle(examples)
 
         return examples
 
