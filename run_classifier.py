@@ -549,6 +549,124 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
         return examples
 
 
+class IcbuTicketsLabelEmbeddingProcessor(DataProcessor):
+    """Processor for the Icbu tickets data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_train.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "test")
+
+    def get_test_examples_with_label(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "icbu_tickets_test.tsv")), "dev")
+
+    def get_test_results(self, data_dir):
+        """See base class."""
+        return self._read_tsv(os.path.join(data_dir, "test_results.tsv"))
+
+    def get_test_result(self, index):
+        """See base class."""
+        results = self._read_tsv(os.path.join("pai_output_512", "test_results.tsv"))
+        return results[index]
+
+    def process_test_results(self, data_dir):
+        processed_result = []
+        results = self._read_tsv(os.path.join(data_dir, "test_results.tsv"))
+        for i in range(int(len(results) / 330)):
+            processed_result.append([])
+            for j in range(330):
+                processed_result[i].append(results[i * 330 + j][1])
+
+        output_result_file = os.path.join(data_dir, "test_results_processed.txt")
+
+        with tf.gfile.GFile(output_result_file, "w") as writer:
+            for i in range(len(processed_result)):
+                writer.write("\t".join(processed_result[i]) + '\n')
+        return
+
+
+    def get_all_labels(self, data_dir):
+        """See base class."""
+        if not hasattr(self, 'labels'):
+            lines = self._read_tsv(os.path.join(data_dir, "icbu_tickets_labels.tsv"))
+            self.labels = []
+            for (i, line) in enumerate(lines):
+                if i == 0:
+                    continue
+                self.labels.append(tokenization.convert_to_unicode(line[0].replace("ICBU/", "")))
+
+        return self.labels
+
+    def get_labels(self):
+        """See base class."""
+        return self.get_all_labels(FLAGS.data_dir)
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        positive_count = 10
+        negative_count = 10
+
+        all_classes = self.get_all_labels(FLAGS.data_dir)
+
+        for (i, line) in enumerate(lines):
+            if i == 0:
+                continue
+            #guid = "%s-%s" % (set_type, i)
+            text_a = tokenization.convert_to_unicode(_html2text(line[5]))
+            text_b = tokenization.convert_to_unicode(line[9].replace("ICBU/", ""))
+
+            binary_examples = []
+
+            if set_type == "test":
+                for index in range(len(all_classes)):
+                    guid = "%s-%s" % (set_type, i * 1000 + index)
+                    class_as_text_b = all_classes[index].replace("ICBU/", "")
+                    binary_examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=class_as_text_b, label="0"))
+            else:
+                for j in range(positive_count):
+                    guid = "%s-%s" % (set_type, i * 1000 + j)
+                    binary_examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=text_b.replace("ICBU/", ""), label="1"))
+
+                #sample_indexes = np.random.randint(0, len(all_labels), negative_count)
+                #sample_indexes = np.random.permutation(negative_count)
+                sample_indexes = random.sample(range(len(all_classes)), negative_count)
+                for index in sample_indexes:
+                    guid = "%s-%s" % (set_type, i * 1000 + positive_count + index)
+                    class_as_text_b = all_classes[index].replace("ICBU/", "")
+                    if class_as_text_b == text_b:
+                        label = "1"
+                    else:
+                        label = "0"
+                    binary_examples.append(
+                        InputExample(guid=guid, text_a=text_a, text_b=class_as_text_b, label=label))
+
+                binary_examples_indexes = np.random.permutation(len(binary_examples))
+                binary_examples = [binary_examples[j] for j in binary_examples_indexes]
+
+            examples.extend(binary_examples)
+            #examples.append(binary_examples[binary_examples_indexes])
+
+        #if set_type == "train":
+        #    shuffle(examples)
+
+        return examples
+
+
 def _html2text(line):
     text = html2text.html2text(line)
     html_attr_value_expr = "[ :,\)\(\-a-zA-Z0-9\"\n]+"
@@ -879,6 +997,87 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     return (loss, per_example_loss, logits, probabilities)
 
 
+def create_model2(bert_config, is_training, input_ids, input_mask, segment_ids,
+                 labels, num_labels, use_one_hot_embeddings):
+  """Creates a classification model."""
+  model = modeling.BertModel(
+      config=bert_config,
+      is_training=is_training,
+      input_ids=input_ids,
+      input_mask=input_mask,
+      token_type_ids=segment_ids,
+      use_one_hot_embeddings=use_one_hot_embeddings)
+
+  output_layer = model.get_pooled_output()
+
+  hidden_size = output_layer.shape[-1].value
+
+  transform_hidden_size = 300
+
+  text_transform_weights = tf.get_variable(
+      "text_transform_weights", [transform_hidden_size, hidden_size],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+  text_transform_bias = tf.get_variable(
+      "text_transform_bias", [transform_hidden_size], initializer=tf.zeros_initializer())
+
+  text_transform_layer = tf.matmul(output_layer, text_transform_weights, transpose_b=True)
+  text_transform_layer = tf.nn.bias_add(text_transform_layer, text_transform_bias)
+  text_transform_layer = tf.nn.relu(text_transform_layer)
+
+  label_transform_weights = tf.get_variable(
+      "label_transform_weights", [transform_hidden_size, hidden_size],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+  label_transform_bias = tf.get_variable(
+      "label_transform_bias", [transform_hidden_size], initializer=tf.zeros_initializer())
+
+  label_transform_layer = tf.matmul(labels, label_transform_weights, transpose_b=True)
+  label_transform_layer = tf.nn.bias_add(label_transform_layer, label_transform_bias)
+  label_transform_layer = tf.nn.relu(label_transform_layer)
+
+  # 合并成 2 * transform_hidden_size大小的向量
+  joint_layer = tf.concat(text_transform_layer, label_transform_layer, axis=-1)
+
+  joint_hidden_size = 600
+
+  joint_transform_weights = tf.get_variable(
+      "joint_transform_weights", [joint_hidden_size, 2 * transform_hidden_size],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+  joint_transform_bias = tf.get_variable(
+      "joint_transform_bias", [joint_hidden_size], initializer=tf.zeros_initializer())
+
+  joint_transform_layer = tf.matmul(joint_layer, joint_transform_weights, transpose_b=True)
+  joint_transform_layer = tf.nn.bias_add(joint_transform_layer, joint_transform_bias)
+
+  joint_transform_layer = tf.nn.relu(joint_transform_layer)
+
+  output_weights = tf.get_variable(
+      "output_weights", [num_labels, joint_hidden_size],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+  output_bias = tf.get_variable(
+      "output_bias", [num_labels], initializer=tf.zeros_initializer())
+
+  with tf.variable_scope("loss"):
+    if is_training:
+      # I.e., 0.1 dropout
+      output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
+
+    logits = tf.matmul(joint_transform_layer, output_weights, transpose_b=True)
+    logits = tf.nn.bias_add(logits, output_bias)
+    probabilities = tf.nn.softmax(logits, axis=-1)
+    log_probs = tf.nn.log_softmax(logits, axis=-1)
+
+    one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
+
+    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
+    loss = tf.reduce_mean(per_example_loss)
+
+    return (loss, per_example_loss, logits, probabilities)
+
+
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
@@ -903,7 +1102,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-    (total_loss, per_example_loss, logits, probabilities) = create_model(
+    (total_loss, per_example_loss, logits, probabilities) = create_model2(
         bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
         num_labels, use_one_hot_embeddings)
 
@@ -1057,6 +1256,7 @@ def main(_):
       "xnli": XnliProcessor,
       "icbu-tickets": IcbuTicketsProcessor,
       "icbu-tickets-binary": IcbuTicketsBinaryProcessor,
+      "icbu-tickets-label-embedding": IcbuTicketsLabelEmbeddingProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
