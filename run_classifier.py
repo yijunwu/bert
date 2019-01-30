@@ -516,9 +516,8 @@ class IcbuTicketsBinaryProcessor(DataProcessor):
                 for index in range(len(all_classes)):
                     guid = "%s-%s" % (set_type, i * 1000 + index)
                     class_as_text_b = all_classes[index].replace("ICBU/", "")
-                    label = "0"
                     binary_examples.append(
-                        InputExample(guid=guid, text_a=text_a, text_b=class_as_text_b, label=label))
+                        InputExample(guid=guid, text_a=text_a, text_b=class_as_text_b, label="0"))
             else:
                 for j in range(positive_count):
                     guid = "%s-%s" % (set_type, i * 1000 + j)
